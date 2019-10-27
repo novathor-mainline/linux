@@ -945,7 +945,7 @@ static int ab8500_usb_probe(struct platform_device *pdev)
 	if (is_ab8500(ab->ab8500) && !is_ab8500_2p0_or_earlier(ab->ab8500))
 		/* Phy tuning values for AB8500 > v2.0 */
 		ab8500_usb_set_ab8500_tuning_values(ab);
-	else if (is_ab8505(ab->ab8500))
+	else if (false && is_ab8505(ab->ab8500))
 		/* Phy tuning values for AB8505 */
 		ab8500_usb_set_ab8505_tuning_values(ab);
 
