@@ -48,6 +48,7 @@ struct mcde_dsi {
 	unsigned long hs_freq;
 	unsigned long lp_freq;
 	bool unused;
+	bool dumb_mode; /* Skip DSI PHY configuration */
 
 	void __iomem *regs;
 	struct regmap *prcmu;
@@ -397,6 +398,24 @@ static void mcde_dsi_setup_video_mode(struct mcde_dsi *d,
 	u32 blkeol_pck, blkeol_duration;
 	u32 val;
 
+	if (d->dumb_mode) {
+		/*
+		 * In dumb mode we expect the bootloader to initialize all
+		 * DSI PHY registers. Therefore, the video stream generator
+		 * (VSG) will be already active at this point.
+		 *
+		 * The VSG will run into an error and disable itself when we
+		 * temporarily stop feeding data to the display while setting up
+		 * the new overlay configuration. Therefore we disable it
+		 * here, temporarily, and re-enable it once everything has been
+		 * set up.
+		 */
+		val = readl(d->regs + DSI_MCTL_MAIN_DATA_CTL);
+		val &= ~DSI_MCTL_MAIN_DATA_CTL_VID_EN;
+		writel(val, d->regs + DSI_MCTL_MAIN_DATA_CTL);
+		return;
+	}
+
 	val = 0;
 	if (d->mdsi->mode_flags & MIPI_DSI_MODE_VIDEO_BURST)
 		val |= DSI_VID_MAIN_CTL_BURST_MODE;
@@ -692,28 +711,33 @@ static void mcde_dsi_bridge_pre_enable(struct drm_bridge *bridge)
 	u32 val;
 	int ret;
 
-	/* Copy maximum clock frequencies */
-	if (d->mdsi->lp_rate)
-		lp_freq = d->mdsi->lp_rate;
-	else
-		lp_freq = DSI_DEFAULT_LP_FREQ_HZ;
-	if (d->mdsi->hs_rate)
-		hs_freq = d->mdsi->hs_rate;
-	else
-		hs_freq = DSI_DEFAULT_HS_FREQ_HZ;
+	if (!d->dumb_mode) {
+		/* Copy maximum clock frequencies */
+		if (d->mdsi->lp_rate)
+			lp_freq = d->mdsi->lp_rate;
+		else
+			lp_freq = DSI_DEFAULT_LP_FREQ_HZ;
+		if (d->mdsi->hs_rate)
+			hs_freq = d->mdsi->hs_rate;
+		else
+			hs_freq = DSI_DEFAULT_HS_FREQ_HZ;
 
-	/* Enable LP (Low Power, Energy Save, ES) and HS (High Speed) clocks */
-	d->lp_freq = clk_round_rate(d->lp_clk, lp_freq);
-	ret = clk_set_rate(d->lp_clk, d->lp_freq);
-	if (ret)
-		dev_err(d->dev, "failed to set LP clock rate %lu Hz\n",
-			d->lp_freq);
+		/* Enable LP (Low Power, Energy Save, ES) and HS (High Speed) clocks */
+		d->lp_freq = clk_round_rate(d->lp_clk, lp_freq);
+		ret = clk_set_rate(d->lp_clk, d->lp_freq);
+		if (ret)
+			dev_err(d->dev, "failed to set LP clock rate %lu Hz\n",
+				d->lp_freq);
 
-	d->hs_freq = clk_round_rate(d->hs_clk, hs_freq);
-	ret = clk_set_rate(d->hs_clk, d->hs_freq);
-	if (ret)
-		dev_err(d->dev, "failed to set HS clock rate %lu Hz\n",
-			d->hs_freq);
+		d->hs_freq = clk_round_rate(d->hs_clk, hs_freq);
+		ret = clk_set_rate(d->hs_clk, d->hs_freq);
+		if (ret)
+			dev_err(d->dev, "failed to set HS clock rate %lu Hz\n",
+				d->hs_freq);
+	} else {
+		d->lp_freq = clk_get_rate(d->lp_clk);
+		d->hs_freq = clk_get_rate(d->hs_clk);
+	}
 
 	/* Start clocks */
 	ret = clk_prepare_enable(d->lp_clk);
@@ -838,9 +862,11 @@ static void mcde_dsi_bridge_disable(struct drm_bridge *bridge)
 		mcde_dsi_wait_for_command_mode_stop(d);
 	}
 
-	/* Stop clocks */
-	clk_disable_unprepare(d->hs_clk);
-	clk_disable_unprepare(d->lp_clk);
+	if (!d->dumb_mode) {
+		/* Stop clocks */
+		clk_disable_unprepare(d->hs_clk);
+		clk_disable_unprepare(d->lp_clk);
+	}
 }
 
 static int mcde_dsi_bridge_attach(struct drm_bridge *bridge)
@@ -905,20 +931,22 @@ static int mcde_dsi_bind(struct device *dev, struct device *master,
 		return PTR_ERR(d->lp_clk);
 	}
 
-	/* Assert RESET through the PRCMU, active low */
-	/* FIXME: which DSI block? */
-	regmap_update_bits(d->prcmu, PRCM_DSI_SW_RESET,
-			   PRCM_DSI_SW_RESET_DSI0_SW_RESETN, 0);
+	if (!d->dumb_mode) {
+		/* Assert RESET through the PRCMU, active low */
+		/* FIXME: which DSI block? */
+		regmap_update_bits(d->prcmu, PRCM_DSI_SW_RESET,
+				   PRCM_DSI_SW_RESET_DSI0_SW_RESETN, 0);
 
-	usleep_range(100, 200);
+		usleep_range(100, 200);
 
-	/* De-assert RESET again */
-	regmap_update_bits(d->prcmu, PRCM_DSI_SW_RESET,
-			   PRCM_DSI_SW_RESET_DSI0_SW_RESETN,
-			   PRCM_DSI_SW_RESET_DSI0_SW_RESETN);
+		/* De-assert RESET again */
+		regmap_update_bits(d->prcmu, PRCM_DSI_SW_RESET,
+				   PRCM_DSI_SW_RESET_DSI0_SW_RESETN,
+				   PRCM_DSI_SW_RESET_DSI0_SW_RESETN);
 
-	/* Start up the hardware */
-	mcde_dsi_start(d);
+		/* Start up the hardware */
+		mcde_dsi_start(d);
+	}
 
 	/* Look for a panel as a child to this node */
 	for_each_available_child_of_node(dev->of_node, child) {
@@ -976,8 +1004,9 @@ static void mcde_dsi_unbind(struct device *dev, struct device *master,
 
 	if (d->panel)
 		drm_panel_bridge_remove(d->bridge_out);
-	regmap_update_bits(d->prcmu, PRCM_DSI_SW_RESET,
-			   PRCM_DSI_SW_RESET_DSI0_SW_RESETN, 0);
+	if (!d->dumb_mode)
+		regmap_update_bits(d->prcmu, PRCM_DSI_SW_RESET,
+				   PRCM_DSI_SW_RESET_DSI0_SW_RESETN, 0);
 }
 
 static const struct component_ops mcde_dsi_component_ops = {
@@ -1014,6 +1043,8 @@ static int mcde_dsi_probe(struct platform_device *pdev)
 		dev_err(dev, "no DSI regs\n");
 		return PTR_ERR(d->regs);
 	}
+
+	d->dumb_mode = of_property_read_bool(dev->of_node, "ste,dumb-mode");
 
 	dsi_id = readl(d->regs + DSI_ID_REG);
 	dev_info(dev, "HW revision 0x%08x\n", dsi_id);
