@@ -244,6 +244,19 @@
 				};
 			};
 		};
+
+		mcde@a0350000 {
+			status = "okay";
+
+			dsi@a0351000 {
+				ste,dumb-mode;
+
+				panel {
+					compatible = "samsung,s6e63m0-dsi-simple";
+					reg = <0>;
+				};
+			};
+		};
 	};
 
 	gpio-keys {
