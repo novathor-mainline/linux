@@ -3669,6 +3669,37 @@ static const struct panel_desc_dsi osd101t2045_53ts = {
 	.lanes = 4,
 };
 
+static const struct drm_display_mode s6e63m0_dsi_mode = {
+	.clock = (480 + 16 + 2 + 16) * (800 + 48 + 2 + 3) * 60 / 1000,
+	.hdisplay = 480,
+	.hsync_start = 480 + 16,
+	.hsync_end = 480 + 16 + 2,
+	.htotal = 480 + 16 + 2 + 16,
+	.vdisplay = 800,
+	.vsync_start = 800 + 48,
+	.vsync_end = 800 + 48 + 2,
+	.vtotal = 800 + 48 + 2 + 3,
+	.vrefresh = 60,
+	.width_mm = 53,
+	.height_mm = 89,
+};
+
+static const struct panel_desc_dsi s6e63m0_dsi = {
+	.desc = {
+		.modes = &s6e63m0_dsi_mode,
+		.num_modes = 1,
+		.bpc = 8,
+		.size = {
+			.width = 53,
+			.height = 89,
+		},
+	},
+	.flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_BURST |
+		 MIPI_DSI_MODE_EOT_PACKET,
+	.format = MIPI_DSI_FMT_RGB888,
+	.lanes = 2,
+};
+
 static const struct of_device_id dsi_of_match[] = {
 	{
 		.compatible = "auo,b080uan01",
@@ -3691,6 +3722,9 @@ static const struct of_device_id dsi_of_match[] = {
 	}, {
 		.compatible = "osddisplays,osd101t2045-53ts",
 		.data = &osd101t2045_53ts
+	}, {
+		.compatible = "samsung,s6e63m0-dsi-simple",
+		.data = &s6e63m0_dsi
 	}, {
 		/* sentinel */
 	}
