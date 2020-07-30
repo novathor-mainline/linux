@@ -194,8 +194,8 @@ static int mcde_dsi_host_detach(struct mipi_dsi_host *host,
 	 (type == MIPI_DSI_GENERIC_READ_REQUEST_2_PARAM) || \
 	 (type == MIPI_DSI_DCS_READ))
 
-static ssize_t mcde_dsi_host_transfer(struct mipi_dsi_host *host,
-				      const struct mipi_dsi_msg *msg)
+static ssize_t mcde_dsi_host_transfer_commit(struct mipi_dsi_host *host,
+					     const struct mipi_dsi_msg *msg)
 {
 	struct mcde_dsi *d = host_to_mcde_dsi(host);
 	const u32 loop_delay_us = 10; /* us */
@@ -337,6 +337,23 @@ static ssize_t mcde_dsi_host_transfer(struct mipi_dsi_host *host,
 	writel(~0, d->regs + DSI_DIRECT_CMD_STS_CLR);
 	writel(~0, d->regs + DSI_CMD_MODE_STS_CLR);
 
+	return ret;
+}
+
+static ssize_t mcde_dsi_host_transfer(struct mipi_dsi_host *host,
+				      const struct mipi_dsi_msg *msg)
+{
+	struct mcde_dsi *d = host_to_mcde_dsi(host);
+	int retries = 2;
+	ssize_t ret;
+
+	while (retries--) {
+		ret = mcde_dsi_host_transfer_commit(host, msg);
+		if (ret >= 0)
+			return ret;
+	}
+
+	dev_err(d->dev, "gave up transfer after retrying\n");
 	return ret;
 }
 
